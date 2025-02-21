@@ -271,35 +271,56 @@ export class Driver implements Debuggable, UpdateSource {
 
 // function to handle Range requests
 private async handleRangeRequest(req: Request): Promise<Response> {
-  const rangeHeader = req.headers.get('range');
-  const rangeMatch = /bytes=(\d+)-(\d+)?/.exec(rangeHeader!);
-  if (!rangeMatch) {
+  try {
+    const response = await fetch(req);
+    const contentType = response.headers.get('Content-Type');
+
+    // Only apply logic to content that is a video
+    if (!contentType || !contentType.startsWith('video/')) {
+      return response;
+    }
+
+    const rangeHeader = req.headers.get('range');
+    if (!rangeHeader) {
+      return new Response(null, {
+        status: 416,
+        statusText: 'Range Not Satisfiable',
+      });
+    }
+
+    const rangeMatch = /bytes=(\d+)-(\d+)?/.exec(rangeHeader);
+    if (!rangeMatch) {
+      return new Response(null, {
+        status: 416,
+        statusText: 'Range Not Satisfiable',
+      });
+    }
+
+    const start = Number(rangeMatch[1]);
+    const end = rangeMatch[2] ? Number(rangeMatch[2]) : undefined;
+
+    const buffer = await response.arrayBuffer();
+    const contentLength = buffer.byteLength;
+
+    const chunk = buffer.slice(start, end ? end + 1 : contentLength);
+    const chunkLength = chunk.byteLength;
+
+    const headers = new Headers(response.headers);
+    headers.set('Content-Range', `bytes ${start}-${end ? end : contentLength - 1}/${contentLength}`);
+    headers.set('Content-Length', chunkLength.toString());
+    headers.set('Accept-Ranges', 'bytes');
+
+    return new Response(chunk, {
+      status: 206,
+      statusText: 'Partial Content',
+      headers: headers,
+    });
+  } catch (error) {
     return new Response(null, {
-      status: 416,
-      statusText: 'Range Not Satisfiable',
+      status: 500,
+      statusText: 'Internal Server Error',
     });
   }
-
-  const start = Number(rangeMatch[1]);
-  const end = rangeMatch[2] ? Number(rangeMatch[2]) : undefined;
-
-  const response = await fetch(req);
-  const buffer = await response.arrayBuffer();
-  const contentLength = buffer.byteLength;
-
-  const chunk = buffer.slice(start, end ? end + 1 : contentLength);
-  const chunkLength = chunk.byteLength;
-
-  const headers = new Headers(response.headers);
-  headers.set('Content-Range', `bytes ${start}-${end ? end : contentLength - 1}/${contentLength}`);
-  headers.set('Content-Length', chunkLength.toString());
-  headers.set('Accept-Ranges', 'bytes');
-
-  return new Response(chunk, {
-    status: 206,
-    statusText: 'Partial Content',
-    headers: headers,
-  });
 }
 
 
